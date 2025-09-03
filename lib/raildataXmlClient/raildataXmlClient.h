@@ -36,7 +36,7 @@ class raildataXmlClient: public xmlListener {
           int trainLength;
           byte classesAvailable;
           char opco[50];
-          char calling[MAXMESSAGESIZE];
+          char calling[MAXCALLINGSIZE];
           char serviceMessage[MAXMESSAGESIZE];
           int serviceType;
         };
@@ -65,7 +65,6 @@ class raildataXmlClient: public xmlListener {
         bool addedStopLocation = false;
         int id=0;
         int coaches=0;
-        char buffer[MAXMESSAGESIZE];
 
         String lastErrorMessage = "";
         bool firstDataLoad;

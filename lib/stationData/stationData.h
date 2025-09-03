@@ -4,6 +4,7 @@
 
 #define MAXBOARDMESSAGES 4
 #define MAXMESSAGESIZE 400
+#define MAXCALLINGSIZE 450
 #define MAXBOARDSERVICES 9
 #define MAXLOCATIONSIZE 45
 
@@ -46,7 +47,7 @@ struct rdService {
     bool platformAvailable;
     int numServices;
     bool boardChanged;  // Only for TfL
-    char calling[MAXMESSAGESIZE];   // Only store the calling stops for the first service returned
+    char calling[MAXCALLINGSIZE];   // Only store the calling stops for the first service returned
     char origin[MAXLOCATIONSIZE]; // Only store the origin for the first service returned
     char serviceMessage[MAXMESSAGESIZE];  // Only store the service message for the first service returned
     rdService service[MAXBOARDSERVICES];

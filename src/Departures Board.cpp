@@ -20,7 +20,7 @@
 
 // Release version number
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 4
+#define VERSION_MINOR 5
 #define WEBAPPVER_MAJOR 1
 #define WEBAPPVER_MINOR 2
 
@@ -327,7 +327,7 @@ bool isScrollingStops = false;
 int currentMessage = 0;
 int prevMessage = 0;
 int prevScrollStopsLength = 0;
-char line2[4+MAXBOARDMESSAGES][MAXMESSAGESIZE+12];
+char line2[4+MAXBOARDMESSAGES][MAXCALLINGSIZE+12];
 
 // Line 3 (additional services)
 int line3Service = 0;
@@ -1554,6 +1554,8 @@ void handleSaveSettings() {
         }
       }
       if (tubeMode) progressBar(F("Initialising TfL interface"),70);
+      station.numServices=0;
+      messages.numMessages=0;
     }
   } else {
     // Something went wrong saving the config file
