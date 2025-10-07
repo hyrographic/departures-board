@@ -2046,19 +2046,17 @@ void departureBoardLoop() {
   }
 
   if (millis()>serviceTimer && !isScrollingService && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && lastUpdateResult!=UPD_DATA_ERROR) {
-    // Need to change to the next service if there is one
     if (station.numServices <= 1 && !weatherMsg[0]) {
-      // There's no other services and no weather so just so static attribution.
       drawServiceLine(1,LINE3);
       serviceTimer = millis() + 30000;
       isScrollingService = false;
     } else {
       prevService = line3Service;
       line3Service++;
-      if (station.numServices) {
-        if ((line3Service>station.numServices && !weatherMsg[0]) || (line3Service>station.numServices+1 && weatherMsg[0])) line3Service=1;  // First 'other' service
-      } else {
-        if (weatherMsg[0] && line3Service>1) line3Service=0;
+      // Fix: rollover before reaching invalid index
+      int maxService = weatherMsg[0] ? station.numServices : station.numServices - 1;
+      if (line3Service > maxService) {
+        line3Service = 1;  // Back to second service (index 1)
       }
       scrollServiceYpos=10;
       isScrollingService = true;
