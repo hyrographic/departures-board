@@ -2027,11 +2027,8 @@ void departureBoardLoop() {
     // Need to start a new scrolling line 2
     prevMessage = currentMessage;
     prevScrollStopsLength = scrollStopsLength;
-    if (currentMessage >= numMessages - 1) {
-      currentMessage = 0;
-    } else {
-      currentMessage++;
-    }
+    currentMessage++;
+    if (currentMessage>=numMessages) currentMessage=0;
     scrollStopsXpos=0;
     scrollStopsYpos=10;
     scrollStopsLength = getStringWidth(line2[currentMessage]);
