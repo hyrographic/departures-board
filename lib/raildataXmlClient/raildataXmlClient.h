@@ -70,7 +70,10 @@ class raildataXmlClient: public xmlListener {
         bool firstDataLoad;
         bool endXml;
 
-        char filterCrs[4];
+        // char filterCrs[4];
+        #define MAX_FILTER_STATIONS 5
+        char filterCrs[MAX_FILTER_STATIONS][4];
+        int numFilterStations = 0;
         bool filter = false;
         bool keepRoute = false;
 

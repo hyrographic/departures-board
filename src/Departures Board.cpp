@@ -137,6 +137,12 @@ U8G2_SSD1322_NHD_256X64_F_4W_HW_SPI u8g2(U8G2_R0, /* cs=*/ 26, /* dc=*/ 5, /* re
 #define ULINE3 41
 #define ULINE4 56
 
+#define MAX_CALLING_STATIONS 5
+char callingCrsCode[MAX_CALLING_STATIONS][4];  // Array of station codes
+char callingStation[MAX_CALLING_STATIONS][45]; // Array of station names
+int numCallingStations = 0;                     // Count of active filters
+
+
 //
 // Custom fonts - replicas of those used on the real display boards
 //
@@ -279,7 +285,7 @@ bool sleepEnabled = false;          // Is overnight sleep enabled?
 bool dateEnabled = false;           // Showing the date on screen?
 bool weatherEnabled = false;        // Showing weather at station location. Requires an OpenWeatherMap API key.
 bool enableBus = false;             // Include Bus services on the board?
-bool firmwareUpdates = true;        // Check for and install firmware updates automatically at boot?
+bool firmwareUpdates = false;        // Check for and install firmware updates automatically at boot?
 byte sleepStarts = 0;               // Hour at which the overnight sleep (screensaver) begins
 byte sleepEnds = 6;                 // Hour at which the overnight sleep (screensaver) ends
 int brightness = 50;                // Initial brightness level of the OLED screen
@@ -306,8 +312,8 @@ char nrToken[37];                   // National Rail Darwin Lite Tokens are in t
 char crsCode[4];                    // Station code (3 character)
 float stationLat=0;                 // Selected station Latitude/Longitude (used to get weather for the location)
 float stationLon=0;
-char callingCrsCode[4];             // Station code to filter routes on
-char callingStation[45];            // Calling filter station friendly name
+// char callingCrsCode[4];             // Station code to filter routes on
+// char callingStation[45];            // Calling filter station friendly name
 String tflAppkey = "";              // TfL API Key
 char tubeId[13];                    // Underground station naptan id
 String tubeName="";                 // Underground Station Name
@@ -779,6 +785,8 @@ void loadApiKeys() {
   }
 }
 
+
+
 // Load the configuration settings (if they exist, if not create a default set for the Web GUI page to read)
 void loadConfig() {
   JsonDocument doc;
@@ -791,8 +799,27 @@ void loadConfig() {
         JsonObject settings = doc.as<JsonObject>();
 
         if (settings[F("crs")].is<const char*>())        strlcpy(crsCode, settings[F("crs")], sizeof(crsCode));
-        if (settings["callingCrs"].is<const char*>()) strlcpy(callingCrsCode, settings["callingCrs"], sizeof(callingCrsCode));
-        if (settings["callingStation"].is<const char*>()) strlcpy(callingStation, settings["callingStation"], sizeof(callingStation));
+        
+        // NEW: Load calling stations array
+        numCallingStations = 0;
+        if (settings["callingStations"].is<JsonArray>()) {
+          JsonArray callingArray = settings["callingStations"];
+          for (JsonObject station : callingArray) {
+            if (numCallingStations >= MAX_CALLING_STATIONS) break;
+            if (station["crs"].is<const char*>()) {
+              strlcpy(callingCrsCode[numCallingStations], station["crs"], sizeof(callingCrsCode[0]));
+              strlcpy(callingStation[numCallingStations], station["name"], sizeof(callingStation[0]));
+              numCallingStations++;
+            }
+          }
+        }
+        // Legacy support: if old format exists, convert it
+        else if (settings["callingCrs"].is<const char*>() && strlen(settings["callingCrs"]) > 0) {
+          strlcpy(callingCrsCode[0], settings["callingCrs"], sizeof(callingCrsCode[0]));
+          strlcpy(callingStation[0], settings["callingStation"], sizeof(callingStation[0]));
+          numCallingStations = 1;
+        }
+        
         if (settings["hostname"].is<const char*>())   strlcpy(hostname, settings["hostname"], sizeof(hostname));
         if (settings["wsdlHost"].is<const char*>())   strlcpy(wsdlHost, settings["wsdlHost"], sizeof(wsdlHost));
         if (settings["wsdlAPI"].is<const char*>())    strlcpy(wsdlAPI, settings["wsdlAPI"], sizeof(wsdlAPI));
@@ -801,7 +828,7 @@ void loadConfig() {
         if (settings["sleep"].is<bool>())             sleepEnabled = settings["sleep"];
         if (settings["weather"].is<bool>() && openWeatherMapApiKey.length())
                                                     weatherEnabled = settings["weather"];
-        if (settings["update"].is<bool>())            firmwareUpdates = settings["update"];
+        // if (settings["update"].is<bool>())            firmwareUpdates = settings["update"];
         if (settings["sleepStarts"].is<int>())        sleepStarts = settings["sleepStarts"];
         if (settings["sleepEnds"].is<int>())          sleepEnds = settings["sleepEnds"];
         if (settings["brightness"].is<int>())         brightness = settings["brightness"];
@@ -817,17 +844,31 @@ void loadConfig() {
         else if (tubeName.endsWith(F(" DLR Station"))) tubeName.remove(tubeName.length()-12);
         else if (tubeName.endsWith(F(" (H&C Line)"))) tubeName.remove(tubeName.length()-11);
 
-      } else {
-        // JSON deserialization failed - TODO
       }
       file.close();
     }
   } else {
-    // Write a default config file so that the Web GUI works initially
-    String defaultConfig = "{\"crs\":\"\",\"station\":\"\",\"lat\":0,\"lon\":0,\"weather\":" + String((openWeatherMapApiKey.length())?"true":"false") + F(",\"sleep\":false,\"showDate\":false,\"showBus\":false,\"update\":true,\"sleepStarts\":23,\"sleepEnds\":8,\"brightness\":20,\"tube\":false}");
+    // Write a default config file
+    String defaultConfig = "{\"crs\":\"\",\"station\":\"\",\"lat\":0,\"lon\":0,\"callingStations\":[],\"weather\":" + String((openWeatherMapApiKey.length())?"true":"false") + F(",\"sleep\":false,\"showDate\":false,\"showBus\":false,\"update\":true,\"sleepStarts\":23,\"sleepEnds\":8,\"brightness\":20,\"tube\":false}");
     saveFile("/config.json",defaultConfig);
     strcpy(crsCode,"");
+    numCallingStations = 0;
   }
+}
+
+void handleGetCallingStations() {
+  JsonDocument doc;
+  JsonArray stations = doc.to<JsonArray>();
+  
+  for (int i = 0; i < numCallingStations; i++) {
+    JsonObject station = stations.add<JsonObject>();
+    station["crs"] = callingCrsCode[i];
+    station["name"] = callingStation[i];
+  }
+  
+  String response;
+  serializeJson(doc, response);
+  server.send(200, contentTypeJson, response);
 }
 
 // WiFiManager callback, entered config mode
@@ -928,10 +969,24 @@ bool checkForFirmwareUpdate() {
  */
 
 // Request a data update via the raildataClient
+// 5. UPDATE getStationBoard() to pass multiple calling stations:
 bool getStationBoard() {
   if (!firstLoad) showUpdateIcon(true);
-  lastUpdateResult = raildata->updateDepartures(&station,&messages,crsCode,nrToken,MAXBOARDSERVICES,enableBus,callingCrsCode);
-  nextDataUpdate = millis()+DATAUPDATEINTERVAL; // default update freq
+  
+  // Build comma-separated list of calling station codes
+  char callingFilter[MAX_CALLING_STATIONS * 4] = "";
+  if (numCallingStations > 0) {
+    strcpy(callingFilter, callingCrsCode[0]);
+    for (int i = 1; i < numCallingStations; i++) {
+      strcat(callingFilter, ",");
+      strcat(callingFilter, callingCrsCode[i]);
+    }
+  }
+  
+  // Now this works! The library handles the comma-separated codes
+  lastUpdateResult = raildata->updateDepartures(&station, &messages, crsCode, nrToken, MAXBOARDSERVICES, enableBus, callingFilter);
+  nextDataUpdate = millis()+DATAUPDATEINTERVAL;
+  
   if (lastUpdateResult == UPD_SUCCESS || lastUpdateResult == UPD_NO_CHANGE) {
     showUpdateIcon(false);
     lastDataLoadTime=millis();
@@ -941,7 +996,7 @@ bool getStationBoard() {
   } else if (lastUpdateResult == UPD_DATA_ERROR || lastUpdateResult == UPD_TIMEOUT) {
     lastLoadFailure=millis();
     dataLoadFailure++;
-    nextDataUpdate = millis() + 30000; // 30 secs
+    nextDataUpdate = millis() + 30000;
     showUpdateIcon(false);
     return false;
   } else if (lastUpdateResult == UPD_UNAUTHORISED) {
@@ -963,11 +1018,11 @@ void drawPrimaryService(bool showVia) {
   u8g2.setFont(NatRailTall12);
   blankArea(0,LINE1,256,LINE2-LINE1);
   destPos = u8g2.drawStr(0,LINE1-1,station.service[0].sTime) + 6;
-  if (station.service[0].platform[0] && strlen(station.service[0].platform)<3 && station.service[0].serviceType == TRAIN) {
-    destPos += u8g2.drawStr(destPos,LINE1-1,station.service[0].platform) + 6;
-  } else if (station.service[0].serviceType == BUS) {
-    destPos += u8g2.drawStr(destPos,LINE1-1,"~") + 6; // Bus icon
-  }
+  // if (station.service[0].platform[0] && strlen(station.service[0].platform)<3 && station.service[0].serviceType == TRAIN) {
+  //   destPos += u8g2.drawStr(destPos,LINE1-1,station.service[0].platform) + 6;
+  // } else if (station.service[0].serviceType == BUS) {
+  //   destPos += u8g2.drawStr(destPos,LINE1-1,"~") + 6; // Bus icon
+  // }
   if (isDigit(station.service[0].etd[0])) sprintf(etd,"Exp %s",station.service[0].etd);
   else strcpy(etd,station.service[0].etd);
   int etdWidth = getStringWidth(etd);
@@ -1013,17 +1068,18 @@ void drawServiceLine(int line, int y) {
     u8g2.drawStr(0,y-1,ordinal);
     int destPos = u8g2.drawStr(23,y-1,station.service[line].sTime) + 27;
     char plat[3];
-    if (station.platformAvailable) {
-      if (station.service[line].platform[0] && strlen(station.service[line].platform)<3 && station.service[line].serviceType == TRAIN) {
-        strncpy(plat,station.service[line].platform,3);
-        plat[2]='\0';
-      } else {
-        if (station.service[line].serviceType == BUS) strcpy(plat,"~");  // Bus icon
-        else strcpy(plat,"}}");
-      }
-      u8g2.drawStr(destPos+11-getStringWidth(plat),y-1,plat);
-      destPos+=16;
-    }
+    // if (station.platformAvailable) {
+      // if (station.service[line].platform[0] && strlen(station.service[line].platform)<3 && station.service[line].serviceType == TRAIN) {
+        // strncpy(plat,station.service[line].platform,3);
+        // plat[2]='\0';
+      // } else {
+      //   if (station.service[line].serviceType == BUS) strcpy(plat,"~");  // Bus icon
+      //   else strcpy(plat,"}}");
+      // }
+      // u8g2.drawStr(destPos+11-getStringWidth(plat),y-1,plat);
+      // destPos+=0;
+    // }
+    destPos+=0;
     char etd[16];
     if (isDigit(station.service[line].etd[0])) sprintf(etd,"Exp %s",station.service[line].etd);
     else strcpy(etd,station.service[line].etd);
@@ -1047,9 +1103,6 @@ void drawServiceLine(int line, int y) {
     if (weatherMsg[0] && line==station.numServices) {
       // We're showing the weather
       centreText(weatherMsg,y-1);
-    } else {
-      // We're showing the mandatory attribution
-      centreText(F("Powered by National Rail Enquiries"),y-1);
     }
   }
 }
@@ -1068,7 +1121,7 @@ void drawStationBoard() {
   }
   u8g2.setFont(NatRailSmall9);
   char boardTitle[95];
-  if (callingStation[0]) snprintf(boardTitle,sizeof(boardTitle),"%s  (%c%s)",station.location,129,callingStation);
+  if (callingStation[0]) snprintf(boardTitle,sizeof(boardTitle),"%s",station.location,129);
   else strncpy(boardTitle,station.location,sizeof(boardTitle));
 
   if (dateEnabled) {
@@ -1195,6 +1248,7 @@ void drawStationBoard() {
   u8g2.setFont(NatRailSmall9);
   u8g2.sendBuffer();
 }
+
 
 /*
  *
@@ -1699,7 +1753,7 @@ void handleInfo() {
   sprintf(sysUptime,"%d days, %d hrs, %d min", days,hours,minutes);
 
   String message = "Hostname: " + String(hostname) + F("\nFirmware version: v") + String(VERSION_MAJOR) + "." + String(VERSION_MINOR) + " " + getBuildTime() + F("\nSystem uptime: ") + String(sysUptime) + F("\nFree Heap: ") + String(ESP.getFreeHeap()) + F("\nFree LittleFS space: ") + String(LittleFS.totalBytes() - LittleFS.usedBytes());
-  message+="\nCore Plaform: " + String(ESP.getCoreVersion()) + F("\nCPU speed: ") + String(ESP.getCpuFreqMHz()) + F("MHz\nCPU Temperature: ") + String(temperatureRead()) + F("\nWiFi network: ") + String(WiFi.SSID()) + F("\nWiFi signal strength: ") + String(WiFi.RSSI()) + F("dB");
+  message+="\nCore Plaform: " + String(ESP.getSdkVersion()) + F("\nCPU speed: ") + String(ESP.getCpuFreqMHz()) + F("MHz\nCPU Temperature: ") + String(temperatureRead()) + F("\nWiFi network: ") + String(WiFi.SSID()) + F("\nWiFi signal strength: ") + String(WiFi.RSSI()) + F("dB");
   getLocalTime(&timeinfo);
 
   sprintf(sysUptime,"%02d:%02d:%02d %02d/%02d/%04d",timeinfo.tm_hour,timeinfo.tm_min,timeinfo.tm_sec,timeinfo.tm_mday,timeinfo.tm_mon+1,timeinfo.tm_year+1900);
@@ -1745,6 +1799,10 @@ void handleInfo() {
     default:
       message+="ERROR CODE (" + String(lastUpdateResult) + F(")");
       break;
+  }
+  message += "\n\nCalling Station Filters (" + String(numCallingStations) + "):\n";
+  for (int i = 0; i < numCallingStations; i++) {
+    message += String(callingStation[i]) + " (" + String(callingCrsCode[i]) + ")\n";
   }
   sendResponse(200,message);
 }
@@ -1969,8 +2027,11 @@ void departureBoardLoop() {
     // Need to start a new scrolling line 2
     prevMessage = currentMessage;
     prevScrollStopsLength = scrollStopsLength;
-    currentMessage++;
-    if (currentMessage>=numMessages) currentMessage=0;
+    if (currentMessage >= numMessages - 1) {
+      currentMessage = 0;
+    } else {
+      currentMessage++;
+    }
     scrollStopsXpos=0;
     scrollStopsYpos=10;
     scrollStopsLength = getStringWidth(line2[currentMessage]);
@@ -2275,6 +2336,7 @@ void setup(void) {
   server.on(F("/savekeys"),HTTP_POST,handleSaveKeys);           // Used by the Web GUI to verify/save API keys
   server.on(F("/brightness"),handleBrightness);                 // Used by the Web GUI to interactively set the panel brightness
   server.on(F("/ota"),handleOtaUpdate);                         // Used by the Web GUI to initiate a manual firmware/WebApp update
+  server.on(F("/getcallingstations"), HTTP_GET, handleGetCallingStations);
 
   server.on("/update", HTTP_GET, []() {
     server.sendHeader("Connection", "close");
@@ -2317,20 +2379,20 @@ void setup(void) {
   server.begin();     // Start the local web server
 
   // Check for Firmware/GUI updates?
-  if (firmwareUpdates) {
-    progressBar(F("Checking for firmware updates"),45);
-    if (ghUpdate.getLatestRelease()) {
-      checkForFirmwareUpdate();
-    } else {
-      for (int i=10;i>=0;i--) {
-        showUpdateCompleteScreen("Firmware Update Check Failed","Unable to retrieve latest release information.",ghUpdate.getLastError().c_str(),i,false);
-        delay(1000);
-      }
-      u8g2.clearDisplay();
-      drawStartupHeading();
-      u8g2.sendBuffer();
-    }
-  }
+  // if (firmwareUpdates) {
+  //   progressBar(F("Checking for firmware updates"),45);
+  //   if (ghUpdate.getLatestRelease()) {
+  //     checkForFirmwareUpdate();
+  //   } else {
+  //     for (int i=10;i>=0;i--) {
+  //       showUpdateCompleteScreen("Firmware Update Check Failed","Unable to retrieve latest release information.",ghUpdate.getLastError().c_str(),i,false);
+  //       delay(1000);
+  //     }
+  //     u8g2.clearDisplay();
+  //     drawStartupHeading();
+  //     u8g2.sendBuffer();
+  //   }
+  // }
 
   // First time configuration?
   if (!crsCode[0] || !nrToken[0]) {

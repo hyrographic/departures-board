@@ -12,13 +12,48 @@
     <link rel="apple-touch-icon" href="favicon.png">
     <link rel="icon" href="favicon.svg" type="image/svg+xml"/>
     <title>Departures Board</title>
+
+    <style>
+    .station-chip {
+      display: inline-block;
+      background: #5cb85c;
+      color: white;
+      padding: 4px 10px;
+      margin: 2px 4px;
+      border-radius: 12px;
+      font-size: 13px;
+    }
+    .station-chip .remove {
+      margin-left: 6px;
+      color: white;
+      cursor: pointer;
+      font-weight: bold;
+      opacity: 0.8;
+    }
+    .station-chip .remove:hover {
+      opacity: 1;
+    }
+    #selected-calling-stations {
+      min-height: 30px;
+      margin-bottom: 8px;
+      padding: 4px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: #f9f9f9;
+    }
+    #selected-calling-stations:empty::before {
+      content: 'No filters set - all services will be shown';
+      color: #999;
+      font-style: italic;
+    }
+  </style>
 </head>
 <body>
   <div style="width: min(90%, 500px); margin: 0 auto; padding: 0 5px;">
     <form id="formsettings">
       <fieldset>
         <legend style="position: relative; text-align: center; min-height: 45px; padding-top:8px;">
-          <div id="nrT" style="display:none">Departures Board Setup</div>
+          <div id="nrT">Departures Board Setup</div>
           <div id="tflT" style="display:none">Arrivals Board Setup</div>
           <div class="dropdown" style="position: absolute; top: 5px; right: 0;">
             <button class="btn btn-default dropdown-toggle" type="button" id="menuButton" data-toggle="dropdown" aria-haspopup="true" aria-expanded="true">
@@ -33,7 +68,7 @@
           </div>
         </legend>
 
-        <div class="form-group" id="nrSearchBox" style="display:none">
+        <div class="form-group" id="nrSearchBox" style="">
           <label class="control-label" for="searchName">Station</label>
           <input id="searchName" type="text" placeholder="Type the station name" class="form-control input-md typeahead">
         </div>
@@ -43,16 +78,23 @@
           <input id="searchNameTfL" type="text" placeholder="Type the underground station name" class="form-control input-md typeahead">
         </div>
 
-        <div class="form-group" id="nrCallingBox" style="display:none">
+        <div class="form-group" id="nrCallingBox" style="">
           <label class="control-label" for="callingStation">Only show services calling at</label>
-          <div style="display: flex; gap: 10px;">
+          
+          <!-- Selected stations chips display -->
+          <div id="selected-calling-stations"></div>
+          
+          <!-- Station picker -->
+          <div style="display: flex; gap: 10px; margin-top: 8px;">
             <div style="flex: 1;">
-              <input id="callingStation" type="text" placeholder="Station name or leave blank for all services" class="form-control input-md typeahead" style="width:100%;">
+              <input id="callingStation" type="text" placeholder="Type station name to add filter..." class="form-control input-md typeahead" style="width:100%;">
             </div>
             <div style="flex-shrink: 0;">
-              <button id="clearFilter" name="clearFilter" class="btn" type="button">Clear</button>
+              <button id="addFilter" name="addFilter" class="btn btn-success" type="button" disabled>Add</button>
+              <button id="clearFilter" name="clearFilter" class="btn btn-default" type="button">Clear All</button>
             </div>
           </div>
+          <span class="help-block">Add up to 5 stations. Services calling at ANY selected station will be shown.</span>
         </div>
 
         <div class="form-group">
@@ -155,7 +197,7 @@
             <div style="flex: 1; text-align: left;">
               <span class="help-block" id="fwinfo" style="margin: 0;"></span>
             </div>
-            <div id="nrAtt" style="display:none">
+            <div id="nrAtt" style="">
               <a href="https://www.nationalrail.co.uk" target="_blank"><img src="/nrelogo.webp" alt="Logo" style="max-height: 40px;"></a>
             </div>
             <div id="tflAtt" style="display:none">
@@ -180,25 +222,32 @@
       appKey: "",
       stationLatitude: 0,
       stationLongitude: 0,
+      // callingStationSelected: false,
+      // callingStation: "",
+      // callingCrs: "",
+      callingStations: [],  // Array of {name, crs} objects
       callingStationSelected: false,
-      callingStation: "",
-      callingCrs: "",
+      pendingCallingStation: null,  // Temp storage for station being added
       firmwareVersion: "",
       jsonSettings: {},
     };
+
+    const MAX_CALLING_STATIONS = 5;
 
     const elements = {
       form: document.getElementById("formsettings"),
       searchName: document.getElementById("searchName"),
       searchNameTfL: document.getElementById("searchNameTfL"),
       callingStation: document.getElementById("callingStation"),
+      selectedCallingStations: document.getElementById("selected-calling-stations"),
+      addFilterButton: document.getElementById("addFilter"),
+      clearButton: document.getElementById("clearFilter"),
       brightness: document.getElementById("brightness"),
       tubeMode: document.getElementById("tubeMode"),
       enableSleep: document.getElementById("enableSleep"),
       sleepStart: document.getElementById("sleepStart"),
       sleepEnd: document.getElementById("sleepEnd"),
       saveButton: document.getElementById("save"),
-      clearButton: document.getElementById("clearFilter"),
       fwinfo: document.getElementById("fwinfo"),
     };
 
@@ -289,13 +338,18 @@
     elements.searchName.addEventListener("focus", () => elements.searchName.select());
     elements.searchName.addEventListener("blur", () => setTimeout(handleStationLostFocus, 500));
     elements.callingStation.addEventListener("focus", () => elements.callingStation.select());
-    elements.callingStation.addEventListener("blur", () => setTimeout(handleCallingStationLostFocus, 500));
+    // elements.callingStation.addEventListener("blur", () => setTimeout(handleCallingStationLostFocus, 500));
     elements.searchNameTfL.addEventListener("focus", () => elements.searchNameTfL.select());
     elements.searchNameTfL.addEventListener("blur", () => setTimeout(handleTfLStationLostFocus, 500));
     elements.enableSleep.addEventListener("change", toggleSleepSelectors);
     elements.brightness.addEventListener("change", handleBrightnessChange);
     elements.clearButton.addEventListener("click", handleClearFilter);
     elements.tubeMode.addEventListener("click", toggleBoardMode);
+
+    elements.callingStation.addEventListener("blur", () => setTimeout(handleCallingStationLostFocus, 500));
+    elements.addFilterButton.addEventListener("click", handleAddCallingStation);
+    elements.clearButton.addEventListener("click", handleClearAllFilters);
+
 
     document.addEventListener("DOMContentLoaded", async () => {
       await fetchConfig();
@@ -372,8 +426,21 @@
       appState.stationLatitude = s.lat || 0;
       appState.stationLongitude = s.lon || 0;
 
-      appState.callingStation = s.callingStation || "";
-      appState.callingCrs = s.callingCrs || "";
+      // appState.callingStation = s.callingStation || "";
+      // appState.callingCrs = s.callingCrs || "";
+      if (s.callingStations && Array.isArray(s.callingStations)) {
+        appState.callingStations = s.callingStations;
+      } 
+      // Legacy support: convert old single station format
+      else if (s.callingCrs && s.callingStation) {
+        appState.callingStations = [{
+          crs: s.callingCrs,
+          name: s.callingStation
+        }];
+      } else {
+        appState.callingStations = [];
+      }
+      renderCallingStations();
 
       appState.tubeName = s.tubeName || "";
       appState.tubeId = s.tubeId || "";
@@ -417,8 +484,11 @@
 
     function handleCallingStationSelected(item) {
       appState.callingStationSelected = true;
-      appState.callingStation = item.name;
-      appState.callingCrs = item.crsCode;
+      appState.pendingCallingStation = {
+        name: item.name,
+        crs: item.crsCode
+      };
+      elements.addFilterButton.removeAttribute("disabled");
     }
 
     function handleTfLStationSelected(item) {
@@ -440,7 +510,9 @@
 
     function handleCallingStationLostFocus() {
       if (!appState.callingStationSelected) {
-        elements.callingStation.value = appState.callingStation;
+        elements.callingStation.value = "";
+        appState.pendingCallingStation = null;
+        elements.addFilterButton.setAttribute("disabled", true);
       } else {
         appState.callingStationSelected = false;
       }
@@ -455,10 +527,58 @@
     }
 
     function handleClearFilter() {
-      appState.callingCrs = "";
-      appState.callingStation = "";
-      appState.callingStationSelected = false;
-      elements.callingStation.value = appState.callingStation;
+      appState.callingStations = [];
+      renderCallingStations();
+      elements.callingStation.value = "";
+      appState.pendingCallingStation = null;
+      elements.addFilterButton.setAttribute("disabled", true);
+    }
+
+    function handleAddCallingStation() {
+      if (!appState.pendingCallingStation) return;
+      
+      // Check if already added
+      if (appState.callingStations.some(s => s.crs === appState.pendingCallingStation.crs)) {
+        alert('This station is already in the filter list');
+        elements.callingStation.value = "";
+        appState.pendingCallingStation = null;
+        elements.addFilterButton.setAttribute("disabled", true);
+        return;
+      }
+      
+      // Check max limit
+      if (appState.callingStations.length >= MAX_CALLING_STATIONS) {
+        alert(`You can only filter by up to ${MAX_CALLING_STATIONS} stations`);
+        return;
+      }
+      
+      // Add the station
+      appState.callingStations.push(appState.pendingCallingStation);
+      renderCallingStations();
+      
+      // Reset input
+      elements.callingStation.value = "";
+      appState.pendingCallingStation = null;
+      elements.addFilterButton.setAttribute("disabled", true);
+    }
+
+    function removeCallingStation(index) {
+      appState.callingStations.splice(index, 1);
+      renderCallingStations();
+    }
+
+    function renderCallingStations() {
+      if (appState.callingStations.length === 0) {
+        elements.selectedCallingStations.innerHTML = '';
+        return;
+      }
+      
+      elements.selectedCallingStations.innerHTML = appState.callingStations.map((station, index) => 
+        `<div class="station-chip">
+          ${station.name} (${station.crs})
+          <span class="remove" onclick="removeCallingStation(${index})">×</span>
+        </div>`
+      ).join('');
     }
 
     function handleBrightnessChange() {
@@ -473,8 +593,11 @@
       s.crs = appState.stationCRS;
       s.lat = appState.stationLatitude;
       s.lon = appState.stationLongitude;
-      s.callingStation = appState.callingStation;
-      s.callingCrs = appState.callingCrs;
+      // s.callingStation = appState.callingStation;
+      // s.callingCrs = appState.callingCrs;
+      s.callingStations = appState.callingStations;
+      delete s.callingStation;
+      delete s.callingCrs;
       s.tubeId = appState.tubeId;
       s.tubeName = appState.tubeName;
       s.tube = appState.tubeMode;

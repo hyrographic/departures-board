@@ -297,11 +297,32 @@ int raildataXmlClient::updateDepartures(rdStation *station, stnMessages *message
     loadingWDSL=false;
     long dataReceived = 0;
     if (callingCrsCode[0]) {
-        strcpy(filterCrs,callingCrsCode);
-        filter=true;
+        filter = true;
+        numFilterStations = 0;
+        
+        // Parse comma-separated CRS codes
+        char tempFilter[50];
+        strncpy(tempFilter, callingCrsCode, sizeof(tempFilter)-1);
+        tempFilter[sizeof(tempFilter)-1] = '\0';
+        
+        char* token = strtok(tempFilter, ",");
+        while (token != NULL && numFilterStations < MAX_FILTER_STATIONS) {
+            // Trim whitespace
+            while (*token == ' ') token++;
+            if (strlen(token) == 3) {  // Valid CRS code
+                strncpy(filterCrs[numFilterStations], token, 3);
+                filterCrs[numFilterStations][3] = '\0';
+                numFilterStations++;
+            }
+            token = strtok(NULL, ",");
+        }
+        
+        if (numFilterStations == 0) {
+            filter = false;  // No valid filters found
+        }
     } else {
-        strcpy(filterCrs,"");
-        filter=false;
+        filter = false;
+        numFilterStations = 0;
     }
     keepRoute=false;
 
@@ -536,8 +557,13 @@ void raildataXmlClient::value(const char *value)
         }
         return;
     } else if (filter && tagLevel == 11 && tagPath.endsWith(F("callingPoint/lt8:crs")) && addedStopLocation) {
-        // check if we should keep this route?
-        if (strcmp(filterCrs,value)==0) keepRoute = true;
+        // Check if this calling point matches ANY of our filter stations
+        for (int i = 0; i < numFilterStations; i++) {
+            if (strcmp(filterCrs[i], value) == 0) {
+                keepRoute = true;
+                break;
+            }
+        }
         return;
     } else if (tagLevel == 11 && tagPath.endsWith(F("callingPoint/lt8:st")) && addedStopLocation) {
         // check there's still room to add the eta of the calling point
