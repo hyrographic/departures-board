@@ -382,6 +382,11 @@ rdStation station;
 // Station Messages (shared)
 stnMessages messages;
 
+// Forward declarations
+void drawStationBoard();
+bool hasServiceDeparted(int serviceIndex);
+void removeDeprtedServices();
+
 /*
  * Graphics helper functions for OLED panel
 */
@@ -968,6 +973,81 @@ bool checkForFirmwareUpdate() {
  * Station Board functions - pulling updates and animating the Departures Board main display
  */
 
+bool hasServiceDeparted(int serviceIndex) {
+  if (serviceIndex >= station.numServices) return true;
+  
+  getLocalTime(&timeinfo);
+  int currentMinutes = timeinfo.tm_hour * 60 + timeinfo.tm_min;
+  
+  // Parse the scheduled time (format: "HH:MM")
+  int schedHour = (station.service[serviceIndex].sTime[0] - '0') * 10 + 
+                  (station.service[serviceIndex].sTime[1] - '0');
+  int schedMin = (station.service[serviceIndex].sTime[3] - '0') * 10 + 
+                 (station.service[serviceIndex].sTime[4] - '0');
+  int schedMinutes = schedHour * 60 + schedMin;
+  
+  // Determine actual departure time
+  int departureMinutes = schedMinutes;
+  
+  // If ETD is a time (starts with digit), use it instead
+  if (isDigit(station.service[serviceIndex].etd[0])) {
+    int etdHour = (station.service[serviceIndex].etd[0] - '0') * 10 + 
+                  (station.service[serviceIndex].etd[1] - '0');
+    int etdMin = (station.service[serviceIndex].etd[3] - '0') * 10 + 
+                 (station.service[serviceIndex].etd[4] - '0');
+    departureMinutes = etdHour * 60 + etdMin;
+  }
+  // If cancelled, still show
+  // else if (strcmp(station.service[serviceIndex].etd, "Cancelled") == 0) {
+  //   return false;
+  // }
+  // "On time" or "Delayed" - use scheduled time
+  
+  // Handle midnight rollover
+  if (currentMinutes < 180 && schedMinutes > 1260) {
+    // Current time is after midnight (0-3am), scheduled was before midnight (9pm-midnight)
+    return true;
+  }
+  if (schedMinutes < 180 && currentMinutes > 1260) {
+    // Scheduled is after midnight, current time is before midnight
+    return false;
+  }
+  
+  // Add 0 minute grace period (train considered departed 0 mins after departure time)
+  return currentMinutes > (departureMinutes + 0);
+}
+
+void removeDeprtedServices() {
+  if (station.numServices == 0) return;
+  
+  int writeIndex = 0;
+  for (int readIndex = 0; readIndex < station.numServices; readIndex++) {
+    if (!hasServiceDeparted(readIndex)) {
+      // Keep this service
+      if (writeIndex != readIndex) {
+        // Copy the service data
+        memcpy(&station.service[writeIndex], &station.service[readIndex], sizeof(station.service[0]));
+      }
+      writeIndex++;
+    }
+  }
+  
+  // Update the count
+  int removedCount = station.numServices - writeIndex;
+  station.numServices = writeIndex;
+  
+  if (removedCount > 0) {
+    // Force next data update to happen soon (but not immediately to avoid rapid updates)
+    if (nextDataUpdate > millis() + 1500) {
+      nextDataUpdate = millis() + 1500; // Update in 5 seconds
+    }
+    
+    // Reset animation states to allow smooth transition
+    isScrollingStops = false;
+    isScrollingService = false;
+  }
+}
+
 // Request a data update via the raildataClient
 // 5. UPDATE getStationBoard() to pass multiple calling stations:
 bool getStationBoard() {
@@ -983,8 +1063,14 @@ bool getStationBoard() {
     }
   }
   
+  // Request more services to ensure we always have enough after filtering
+  int servicesToRequest = MAXBOARDSERVICES;
+  if (numCallingStations > 0) {
+    servicesToRequest = min(MAXBOARDSERVICES + 2, 25); // Request up to 3x more when filtering
+  }
+
   // Now this works! The library handles the comma-separated codes
-  lastUpdateResult = raildata->updateDepartures(&station, &messages, crsCode, nrToken, MAXBOARDSERVICES, enableBus, callingFilter);
+  lastUpdateResult = raildata->updateDepartures(&station, &messages, crsCode, nrToken, servicesToRequest, enableBus, callingFilter);
   nextDataUpdate = millis()+DATAUPDATEINTERVAL;
   
   if (lastUpdateResult == UPD_SUCCESS || lastUpdateResult == UPD_NO_CHANGE) {
@@ -992,6 +1078,8 @@ bool getStationBoard() {
     lastDataLoadTime=millis();
     noDataLoaded=false;
     dataLoadSuccess++;
+    // Remove departed services
+    removeDeprtedServices();
     return true;
   } else if (lastUpdateResult == UPD_DATA_ERROR || lastUpdateResult == UPD_TIMEOUT) {
     lastLoadFailure=millis();
@@ -2010,6 +2098,8 @@ void updateCurrentWeather() {
 // The main processing cycle for the National Rail Departures Board
 //
 void departureBoardLoop() {
+  // Check for departed services every minute (when not animating)
+  static unsigned long nextDepartedCheck = 0;
   if ((millis() > nextDataUpdate) && (!isScrollingStops) && (!isScrollingService) && (lastUpdateResult != UPD_UNAUTHORISED) && (!isSleeping) && (wifiConnected)) {
     timer = millis() + 2000;
     if (getStationBoard()) {
