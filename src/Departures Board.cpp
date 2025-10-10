@@ -354,7 +354,7 @@ int fpsDelay=25;                    // Total ms between text movement (for smoot
 unsigned long refreshTimer = 0;
 
 #define SCREENSAVERINTERVAL 10000   // How often the screen is changed in sleep mode (ms - 10 seconds)
-#define DATAUPDATEINTERVAL 150000   // How often we fetch data from National Rail (ms - 2.5 mins)
+#define DATAUPDATEINTERVAL 30000   // How often we fetch data from National Rail (ms - 30 seconds)
 #define UGDATAUPDATEINTERVAL 30000  // How often we fetch data from TfL (ms - 30 secs)
 
 // Weather Stuff
