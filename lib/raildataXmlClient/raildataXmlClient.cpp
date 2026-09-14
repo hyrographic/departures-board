@@ -114,7 +114,10 @@ int raildataXmlClient::init(const char *wsdlHost, const char *wsdlAPI, rdCallbac
     if (soapURL.startsWith(F("https://"))) {
       int delim = soapURL.indexOf(F("/"),8);
       if (delim>0) {
-        soapURL.substring(8,delim).toCharArray(soapHost,sizeof(soapHost));
+        String hostPart = soapURL.substring(8,delim);
+        int portDelim = hostPart.indexOf(':');
+        if (portDelim>0) hostPart = hostPart.substring(0,portDelim);   // Strip any explicit :port (e.g. National Rail now advertises ":443")
+        hostPart.toCharArray(soapHost,sizeof(soapHost));
         soapURL.substring(delim).toCharArray(soapAPI,sizeof(soapAPI));
         return UPD_SUCCESS;
       }
